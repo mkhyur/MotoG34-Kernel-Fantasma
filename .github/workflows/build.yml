@@ -1,4 +1,4 @@
-name: Moto G34 KernelSU Next Fogos Debug v12
+name: Moto G34 KernelSU Next Fogos Debug v13
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
         sudo apt update
         sudo apt install -y bc bison flex git curl cpio unzip libssl-dev libelf-dev python3 clang llvm lld device-tree-compiler
 
-    - name: Source
+    - name: Clone source
       run: |
         git clone --depth=1 https://github.com/Motorola-SM6375-Devs/android_kernel_motorola_sm6375.git kernel
 
@@ -23,15 +23,19 @@ jobs:
       run: |
         curl -LSs https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh | bash -s v3.3.0
 
-    - name: Patch KernelSU fsnotify for kernel 5.4
+    - name: Patch KernelSU includes
       working-directory: kernel
       run: |
         set -Eeuo pipefail
 
-        sed -i 's/handle_inode_event/handle_event/g' drivers/kernelsu/manager/pkg_observer.c || true
+        FILE="drivers/kernelsu/feature/sucompat.c"
 
-        echo "Checking fsnotify patch:"
-        grep -n "handle_event" drivers/kernelsu/manager/pkg_observer.c || true
+        if grep -q "linux/pgtable.h" "$FILE"; then
+          sed -i 's#<linux/pgtable.h>#<asm/pgtable.h>#' "$FILE"
+        fi
+
+        echo "Current includes:"
+        head -20 "$FILE"
 
     - name: Configure
       working-directory: kernel
@@ -53,7 +57,7 @@ jobs:
 
         make O=out olddefconfig
 
-    - name: Build
+    - name: Build debug
       working-directory: kernel
       run: |
         set -Eeuo pipefail
@@ -62,8 +66,9 @@ jobs:
         make O=out LLVM=1 LLVM_IAS=1 V=1 -j$(nproc) 2>&1 | tee build.log
         RESULT=${PIPESTATUS[0]}
         set -e
+
         if [ "$RESULT" != "0" ]; then
-          grep -nEi "error:|fatal error|undefined reference|failed" build.log || true
+          grep -nEi "error:|fatal error|undefined reference|failed|No such file" build.log || true
           tail -200 build.log
           exit $RESULT
         fi
@@ -74,17 +79,3 @@ jobs:
       with:
         name: build-error-log
         path: kernel/build.log
-
-    - name: AnyKernel
-      if: success()
-      run: |
-        git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
-        cp kernel/out/arch/arm64/boot/Image AnyKernel3/
-        cd AnyKernel3
-        zip -r9 ../MotoG34_KernelSU_Next_Fogos.zip .
-
-    - uses: actions/upload-artifact@v4
-      if: success()
-      with:
-        name: MotoG34_KernelSU_Next_Fogos
-        path: MotoG34_KernelSU_Next_Fogos.zip
