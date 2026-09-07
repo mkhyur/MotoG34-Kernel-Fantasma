@@ -1,56 +1,120 @@
-name: Build Moto G34 Fantasma KernelSU SUSFS
+name: Moto G34 Kernel Debug Build
 
 on:
   workflow_dispatch:
+
+env:
+  ARCH: arm64
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v4
 
-      - name: Dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y bc bison flex libssl-dev libelf-dev git curl cpio unzip python3
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Clone Motorola SM6375 kernel
-        run: |
-          git clone --depth=1 https://github.com/Motorola-SM6375-Devs/android_kernel_motorola_sm6375.git kernel
 
-      - name: KernelSU Next 3.3.0
-        working-directory: kernel
-        run: |
-          curl -LSs https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh | bash -s v3.3.0
+    - name: Install dependencies
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        trap 'echo "::error file=${BASH_SOURCE[0]},line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
 
-      - name: Apply Fantasma patch
-        run: |
-          cp patches/include/linux/fantasma.h kernel/include/linux/
-          cp patches/fs/proc/fantasma.c kernel/fs/proc/
+        sudo apt update
+        sudo apt install -y \
+          bc bison flex git curl cpio unzip \
+          libssl-dev libelf-dev python3
 
-      - name: Enable config
-        working-directory: kernel
-        run: |
-          export ARCH=arm64
-          make O=out fogos_defconfig || make O=out sm6375_defconfig
-          echo "CONFIG_KSU=y" >> out/.config
-          make O=out olddefconfig
 
-      - name: Compile
-        working-directory: kernel
-        run: |
-          export ARCH=arm64
-          make O=out LLVM=1 LLVM_IAS=1 -j$(nproc)
+    - name: Clone kernel source
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        trap 'echo "::error file=${BASH_SOURCE[0]},line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
 
-      - name: Create flashable ZIP
-        run: |
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
-          cp kernel/out/arch/arm64/boot/Image AnyKernel3/
-          cd AnyKernel3
-          zip -r9 ../MotoG34_Fantasma_KSU_SUSFS.zip .
+        git clone --depth=1 \
+        https://github.com/Motorola-SM6375-Devs/android_kernel_motorola_sm6375.git kernel
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: MotoG34_Fantasma_KSU_SUSFS
-          path: MotoG34_Fantasma_KSU_SUSFS.zip
+
+    - name: Install KernelSU Next
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        trap 'echo "::error file=${BASH_SOURCE[0]},line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
+
+        curl -LSs \
+        https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh \
+        | bash -s v3.3.0
+
+
+    - name: Apply patches
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        trap 'echo "::error file=${BASH_SOURCE[0]},line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
+
+        if [ ! -d patches ]; then
+          echo "::error::Folder patches not found"
+          exit 1
+        fi
+
+        cp -rv patches/* kernel/
+
+
+    - name: Configure kernel
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        trap 'echo "::error file=${BASH_SOURCE[0]},line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
+
+        echo "Procurando defconfig..."
+
+        if make O=out fogos_defconfig; then
+          echo "Usando fogos_defconfig"
+        elif make O=out sm6375_defconfig; then
+          echo "Usando sm6375_defconfig"
+        else
+          echo "::error::Nenhum defconfig do Moto G34 encontrado"
+          find arch -name "*defconfig" | grep -i moto || true
+          exit 1
+        fi
+
+
+    - name: Build kernel
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        trap 'echo "::error file=${BASH_SOURCE[0]},line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
+
+        make O=out olddefconfig
+
+        make O=out \
+        LLVM=1 \
+        LLVM_IAS=1 \
+        -j$(nproc)
+
+
+    - name: Generate flashable ZIP
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        trap 'echo "::error file=${BASH_SOURCE[0]},line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
+
+        git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
+
+        cp kernel/out/arch/arm64/boot/Image AnyKernel3/
+
+        cd AnyKernel3
+        zip -r9 ../MotoG34_Kernel_Debug.zip .
+
+
+    - name: Upload result
+      uses: actions/upload-artifact@v4
+      with:
+        name: MotoG34_Kernel_Debug
+        path: MotoG34_Kernel_Debug.zip
