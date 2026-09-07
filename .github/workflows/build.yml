@@ -1,4 +1,4 @@
-name: Moto G34 Kernel Debug v5
+name: Moto G34 Kernel Debug v6
 
 on:
   workflow_dispatch:
@@ -11,43 +11,42 @@ jobs:
 
     - uses: actions/checkout@v4
 
-    - name: Install dependencies and LLVM
+    - name: Install dependencies
       shell: bash
       run: |
         set -Eeuo pipefail
+        trap 'echo "::error line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
 
         sudo apt update
-
         sudo apt install -y \
           bc bison flex git curl cpio unzip \
           libssl-dev libelf-dev python3 \
-          clang llvm lld
-
-        clang --version
-        ld.lld --version
+          clang llvm lld device-tree-compiler
 
 
-    - name: Clone kernel
+    - name: Clone Motorola kernel
       shell: bash
       run: |
         set -Eeuo pipefail
+        trap 'echo "::error line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
 
         git clone --depth=1 \
         https://github.com/Motorola-SM6375-Devs/android_kernel_motorola_sm6375.git kernel
 
 
-    - name: KernelSU Next 3.3.0
+    - name: Install KernelSU Next 3.3.0
       working-directory: kernel
       shell: bash
       run: |
         set -Eeuo pipefail
+        trap 'echo "::error line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
 
         curl -LSs \
         https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh \
         | bash -s v3.3.0
 
 
-    - name: Configure fogos
+    - name: Configure Moto G34 fogos
       working-directory: kernel
       shell: bash
       run: |
@@ -59,13 +58,49 @@ jobs:
         make O=out vendor/holi-qgki_defconfig || \
         make O=out gki_defconfig
 
+
         ./scripts/kconfig/merge_config.sh \
         -m \
         -O out \
         out/.config \
         arch/arm64/configs/vendor/ext_config/moto-holi-fogos.config
 
+
+        echo "Checking DT overlay options"
+
+        if grep -R "CONFIG_MOTO_DT_OVERLAY" arch/arm64/configs/vendor/ext_config/moto-holi-fogos.config; then
+          echo "CONFIG_MOTO_DT_OVERLAY=y" >> out/.config
+        fi
+
+        if grep -R "CONFIG_BUILD_ARM64_DT_OVERLAY" arch/arm64/configs/vendor/ext_config/moto-holi-fogos.config; then
+          echo "CONFIG_BUILD_ARM64_DT_OVERLAY=y" >> out/.config
+        fi
+
+
+        echo "CONFIG_BUILD_ARM64_DT_OVERLAY=y" >> out/.config
+
         make O=out olddefconfig
+
+
+    - name: Enable KernelSU
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+
+        echo "CONFIG_KSU=y" >> out/.config
+
+        make O=out olddefconfig
+
+
+    - name: Build DTB
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        export ARCH=arm64
+
+        make O=out dtbs
 
 
     - name: Build kernel
@@ -73,7 +108,6 @@ jobs:
       shell: bash
       run: |
         set -Eeuo pipefail
-
         export ARCH=arm64
 
         make O=out \
@@ -82,7 +116,7 @@ jobs:
         -j$(nproc)
 
 
-    - name: Create AnyKernel ZIP
+    - name: Create AnyKernel3 ZIP
       shell: bash
       run: |
         set -Eeuo pipefail
