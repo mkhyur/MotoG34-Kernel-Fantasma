@@ -1,4 +1,4 @@
-name: Moto G34 KernelSU Next Fogos v9
+name: Moto G34 KernelSU Next Fogos Debug v10
 
 on:
   workflow_dispatch:
@@ -8,38 +8,49 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+
     - uses: actions/checkout@v4
 
     - name: Install tools
       run: |
         set -Eeuo pipefail
         sudo apt update
-        sudo apt install -y bc bison flex git curl cpio unzip libssl-dev libelf-dev python3 clang llvm lld device-tree-compiler
+        sudo apt install -y \
+          bc bison flex git curl cpio unzip \
+          libssl-dev libelf-dev python3 \
+          clang llvm lld device-tree-compiler
+
 
     - name: Clone kernel
       run: |
         set -Eeuo pipefail
-        git clone --depth=1 https://github.com/Motorola-SM6375-Devs/android_kernel_motorola_sm6375.git kernel
+        git clone --depth=1 \
+        https://github.com/Motorola-SM6375-Devs/android_kernel_motorola_sm6375.git kernel
 
-    - name: Install KernelSU Next 3.3.0
+
+    - name: KernelSU Next 3.3.0
       working-directory: kernel
       run: |
         set -Eeuo pipefail
-        curl -LSs https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh | bash -s v3.3.0
+        curl -LSs \
+        https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh \
+        | bash -s v3.3.0
 
-    - name: Configure fogos
+
+    - name: Configure Moto G34 fogos
       working-directory: kernel
       run: |
         set -Eeuo pipefail
+
         export ARCH=arm64
 
         make O=out gki_defconfig
 
         ./scripts/kconfig/merge_config.sh \
-          -m \
-          -O out \
-          out/.config \
-          arch/arm64/configs/vendor/ext_config/moto-holi-fogos.config
+        -m \
+        -O out \
+        out/.config \
+        arch/arm64/configs/vendor/ext_config/moto-holi-fogos.config
 
         scripts/config --file out/.config \
           -e KSU \
@@ -51,22 +62,70 @@ jobs:
 
         make O=out olddefconfig
 
-    - name: Build kernel
+
+    - name: Build kernel detailed
       working-directory: kernel
+      shell: bash
       run: |
         set -Eeuo pipefail
+
         export ARCH=arm64
-        make O=out LLVM=1 LLVM_IAS=1 -j$(nproc)
+
+        set +e
+
+        make O=out \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          V=1 \
+          -j$(nproc) 2>&1 | tee build.log
+
+        RESULT=${PIPESTATUS[0]}
+
+        set -e
+
+        if [ "$RESULT" != "0" ]; then
+          echo "================================="
+          echo " ERRO DE COMPILACAO DETECTADO"
+          echo "================================="
+
+          echo ""
+          echo "Primeiros erros encontrados:"
+          grep -nEi \
+          "error:|fatal error:|undefined reference|failed|No such file|not found|warning:" \
+          build.log | tail -100 || true
+
+          echo ""
+          echo "Ultimas 200 linhas:"
+          tail -200 build.log
+
+          exit $RESULT
+        fi
+
+
+    - name: Upload build log on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: MotoG34-build-error-log
+        path: kernel/build.log
+
 
     - name: Create AnyKernel ZIP
+      if: success()
       run: |
         set -Eeuo pipefail
+
         git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
+
         cp kernel/out/arch/arm64/boot/Image AnyKernel3/
+
         cd AnyKernel3
         zip -r9 ../MotoG34_KernelSU_Next_Fogos.zip .
 
-    - uses: actions/upload-artifact@v4
+
+    - name: Upload ZIP
+      if: success()
+      uses: actions/upload-artifact@v4
       with:
         name: MotoG34_KernelSU_Next_Fogos
         path: MotoG34_KernelSU_Next_Fogos.zip
