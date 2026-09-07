@@ -1,4 +1,4 @@
-name: Moto G34 Kernel Debug v7
+name: Moto G34 KernelSU Next Fogos v9
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Dependencies
+    - name: Install tools
       run: |
         set -Eeuo pipefail
         sudo apt update
@@ -21,7 +21,7 @@ jobs:
         set -Eeuo pipefail
         git clone --depth=1 https://github.com/Motorola-SM6375-Devs/android_kernel_motorola_sm6375.git kernel
 
-    - name: KernelSU Next 3.3.0
+    - name: Install KernelSU Next 3.3.0
       working-directory: kernel
       run: |
         set -Eeuo pipefail
@@ -33,35 +33,40 @@ jobs:
         set -Eeuo pipefail
         export ARCH=arm64
 
-        make O=out vendor/holi_qgki_defconfig || make O=out gki_defconfig
+        make O=out gki_defconfig
 
-        ./scripts/kconfig/merge_config.sh -m -O out \
-        out/.config \
-        arch/arm64/configs/vendor/ext_config/moto-holi-fogos.config
+        ./scripts/kconfig/merge_config.sh \
+          -m \
+          -O out \
+          out/.config \
+          arch/arm64/configs/vendor/ext_config/moto-holi-fogos.config
 
-        echo "CONFIG_ARCH_QCOM=y" >> out/.config
-        echo "CONFIG_QCOM_QMI_HELPERS=y" >> out/.config
-        echo "CONFIG_LTO_NONE=y" >> out/.config
-        echo "CONFIG_SHADOW_CALL_STACK=n" >> out/.config
+        scripts/config --file out/.config \
+          -e KSU \
+          -e ARCH_QCOM \
+          -e QCOM_QMI_HELPERS \
+          -e BUILD_ARM64_DT_OVERLAY \
+          -d SHADOW_CALL_STACK \
+          -e LTO_NONE
 
-        yes "" | make O=out olddefconfig
+        make O=out olddefconfig
 
-    - name: Build
+    - name: Build kernel
       working-directory: kernel
       run: |
         set -Eeuo pipefail
         export ARCH=arm64
         make O=out LLVM=1 LLVM_IAS=1 -j$(nproc)
 
-    - name: Create AnyKernel3
+    - name: Create AnyKernel ZIP
       run: |
         set -Eeuo pipefail
         git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
         cp kernel/out/arch/arm64/boot/Image AnyKernel3/
         cd AnyKernel3
-        zip -r9 ../MotoG34_Kernel_Debug.zip .
+        zip -r9 ../MotoG34_KernelSU_Next_Fogos.zip .
 
     - uses: actions/upload-artifact@v4
       with:
-        name: MotoG34_Kernel_Debug
-        path: MotoG34_Kernel_Debug.zip
+        name: MotoG34_KernelSU_Next_Fogos
+        path: MotoG34_KernelSU_Next_Fogos.zip
