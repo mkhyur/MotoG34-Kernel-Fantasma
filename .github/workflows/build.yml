@@ -1,4 +1,4 @@
-name: Moto G34 Kernel Debug Auto FogoS
+name: Moto G34 Kernel Debug v4
 
 on:
   workflow_dispatch:
@@ -13,49 +13,48 @@ jobs:
     - name: Dependencies
       run: |
         set -Eeuo pipefail
-        trap 'echo "::error line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
         sudo apt update
         sudo apt install -y bc bison flex git curl cpio unzip libssl-dev libelf-dev python3
 
     - name: Clone kernel
       run: |
         set -Eeuo pipefail
-        trap 'echo "::error line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
         git clone --depth=1 https://github.com/Motorola-SM6375-Devs/android_kernel_motorola_sm6375.git kernel
 
     - name: KernelSU Next 3.3.0
       working-directory: kernel
       run: |
         set -Eeuo pipefail
-        trap 'echo "::error line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
         curl -LSs https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh | bash -s v3.3.0
 
-    - name: Detect and configure fogos
+    - name: Configure fogos correctly
       working-directory: kernel
       shell: bash
       run: |
         set -Eeuo pipefail
 
-        echo "Procurando configuração fogos..."
+        export ARCH=arm64
 
-        DEFCONFIG="vendor/ext_config/moto-holi-fogos.config"
+        echo "Checking fogos fragment"
+        test -f arch/arm64/configs/vendor/ext_config/moto-holi-fogos.config
 
-        if [ ! -f "arch/arm64/configs/$DEFCONFIG" ]; then
-          echo "::error::Defconfig fogos não encontrado"
-          exit 1
-        fi
+        echo "Available holi configs:"
+        ls arch/arm64/configs/vendor/ext_config/*fogos*
 
-        echo "Usando: $DEFCONFIG"
+        echo "Base config"
+        ls arch/arm64/configs/vendor/*holi*
 
-        make O=out vendor/holi-qgki_defconfig
+        make O=out vendor/holi_qgki_defconfig || make O=out vendor/holi-qgki_defconfig || make O=out gki_defconfig
 
-        ./scripts/kconfig/merge_config.sh -O out \
+        ./scripts/kconfig/merge_config.sh \
+          -m \
+          -O out \
           out/.config \
-          arch/arm64/configs/$DEFCONFIG
+          arch/arm64/configs/vendor/ext_config/moto-holi-fogos.config
 
         make O=out olddefconfig
 
-    - name: Enable KSU
+    - name: Enable KernelSU
       working-directory: kernel
       run: |
         set -Eeuo pipefail
@@ -68,15 +67,15 @@ jobs:
         set -Eeuo pipefail
         make O=out LLVM=1 LLVM_IAS=1 -j$(nproc)
 
-    - name: AnyKernel3
+    - name: Create ZIP
       run: |
         set -Eeuo pipefail
         git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
         cp kernel/out/arch/arm64/boot/Image AnyKernel3/
         cd AnyKernel3
-        zip -r9 ../MotoG34_KSU_Debug.zip .
+        zip -r9 ../MotoG34_Kernel_Debug.zip .
 
     - uses: actions/upload-artifact@v4
       with:
-        name: MotoG34_KSU_Debug
-        path: MotoG34_KSU_Debug.zip
+        name: MotoG34_Kernel_Debug
+        path: MotoG34_Kernel_Debug.zip
