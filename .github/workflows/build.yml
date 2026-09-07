@@ -1,10 +1,11 @@
-name: Moto G34 Kernel Debug Build
+name: Moto G34 Kernel Debug Auto Defconfig
 
 on:
   workflow_dispatch:
 
 env:
   ARCH: arm64
+  KERNEL_DIR: kernel
 
 jobs:
   build:
@@ -28,7 +29,7 @@ jobs:
           libssl-dev libelf-dev python3
 
 
-    - name: Clone kernel source
+    - name: Clone Motorola SM6375 Kernel
       shell: bash
       run: |
         set -Eeuo pipefail
@@ -38,7 +39,7 @@ jobs:
         https://github.com/Motorola-SM6375-Devs/android_kernel_motorola_sm6375.git kernel
 
 
-    - name: Install KernelSU Next
+    - name: Install KernelSU Next 3.3.0
       working-directory: kernel
       shell: bash
       run: |
@@ -50,18 +51,31 @@ jobs:
         | bash -s v3.3.0
 
 
-    - name: Apply patches
+    - name: Detect defconfig
+      working-directory: kernel
       shell: bash
       run: |
         set -Eeuo pipefail
-        trap 'echo "::error file=${BASH_SOURCE[0]},line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
 
-        if [ ! -d patches ]; then
-          echo "::error::Folder patches not found"
+        echo "===== DEFCONFIGS DISPONIVEIS ====="
+        find arch/arm64/configs -type f | sort
+
+        DEFCONFIG=$(find arch/arm64/configs \
+        -type f \
+        \( -iname "*fogos*" -o -iname "*2363*" -o -iname "*sm6375*" -o -iname "*holi*" \) \
+        | head -n 1)
+
+        if [ -z "$DEFCONFIG" ]; then
+          echo "::error::Não foi encontrado defconfig compatível com Moto G34 fogos"
           exit 1
         fi
 
-        cp -rv patches/* kernel/
+        DEFCONFIG=${DEFCONFIG#arch/arm64/configs/}
+
+        echo "Defconfig encontrado:"
+        echo "$DEFCONFIG"
+
+        echo "DEFCONFIG=$DEFCONFIG" >> $GITHUB_ENV
 
 
     - name: Configure kernel
@@ -71,35 +85,35 @@ jobs:
         set -Eeuo pipefail
         trap 'echo "::error file=${BASH_SOURCE[0]},line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
 
-        echo "Procurando defconfig..."
+        echo "Usando:"
+        echo "$DEFCONFIG"
 
-        if make O=out fogos_defconfig; then
-          echo "Usando fogos_defconfig"
-        elif make O=out sm6375_defconfig; then
-          echo "Usando sm6375_defconfig"
-        else
-          echo "::error::Nenhum defconfig do Moto G34 encontrado"
-          find arch -name "*defconfig" | grep -i moto || true
-          exit 1
-        fi
+        make O=out "$DEFCONFIG"
 
 
-    - name: Build kernel
+    - name: Enable KernelSU
       working-directory: kernel
       shell: bash
       run: |
         set -Eeuo pipefail
         trap 'echo "::error file=${BASH_SOURCE[0]},line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
 
+        echo "CONFIG_KSU=y" >> out/.config
+
         make O=out olddefconfig
 
-        make O=out \
-        LLVM=1 \
-        LLVM_IAS=1 \
-        -j$(nproc)
+
+    - name: Build Kernel
+      working-directory: kernel
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        trap 'echo "::error file=${BASH_SOURCE[0]},line=${LINENO}::Command failed: ${BASH_COMMAND}"' ERR
+
+        make O=out LLVM=1 LLVM_IAS=1 -j$(nproc)
 
 
-    - name: Generate flashable ZIP
+    - name: Create AnyKernel3 ZIP
       shell: bash
       run: |
         set -Eeuo pipefail
@@ -110,10 +124,11 @@ jobs:
         cp kernel/out/arch/arm64/boot/Image AnyKernel3/
 
         cd AnyKernel3
+
         zip -r9 ../MotoG34_Kernel_Debug.zip .
 
 
-    - name: Upload result
+    - name: Upload ZIP
       uses: actions/upload-artifact@v4
       with:
         name: MotoG34_Kernel_Debug
