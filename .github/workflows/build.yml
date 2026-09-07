@@ -1,4 +1,4 @@
-name: Moto G34 Kernel Debug v4
+name: Moto G34 Kernel Debug v5
 
 on:
   workflow_dispatch:
@@ -8,26 +8,46 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+
     - uses: actions/checkout@v4
 
-    - name: Dependencies
+    - name: Install dependencies and LLVM
+      shell: bash
       run: |
         set -Eeuo pipefail
+
         sudo apt update
-        sudo apt install -y bc bison flex git curl cpio unzip libssl-dev libelf-dev python3
+
+        sudo apt install -y \
+          bc bison flex git curl cpio unzip \
+          libssl-dev libelf-dev python3 \
+          clang llvm lld
+
+        clang --version
+        ld.lld --version
+
 
     - name: Clone kernel
+      shell: bash
       run: |
         set -Eeuo pipefail
-        git clone --depth=1 https://github.com/Motorola-SM6375-Devs/android_kernel_motorola_sm6375.git kernel
+
+        git clone --depth=1 \
+        https://github.com/Motorola-SM6375-Devs/android_kernel_motorola_sm6375.git kernel
+
 
     - name: KernelSU Next 3.3.0
       working-directory: kernel
+      shell: bash
       run: |
         set -Eeuo pipefail
-        curl -LSs https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh | bash -s v3.3.0
 
-    - name: Configure fogos correctly
+        curl -LSs \
+        https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh \
+        | bash -s v3.3.0
+
+
+    - name: Configure fogos
       working-directory: kernel
       shell: bash
       run: |
@@ -35,45 +55,45 @@ jobs:
 
         export ARCH=arm64
 
-        echo "Checking fogos fragment"
-        test -f arch/arm64/configs/vendor/ext_config/moto-holi-fogos.config
-
-        echo "Available holi configs:"
-        ls arch/arm64/configs/vendor/ext_config/*fogos*
-
-        echo "Base config"
-        ls arch/arm64/configs/vendor/*holi*
-
-        make O=out vendor/holi_qgki_defconfig || make O=out vendor/holi-qgki_defconfig || make O=out gki_defconfig
+        make O=out vendor/holi_qgki_defconfig || \
+        make O=out vendor/holi-qgki_defconfig || \
+        make O=out gki_defconfig
 
         ./scripts/kconfig/merge_config.sh \
-          -m \
-          -O out \
-          out/.config \
-          arch/arm64/configs/vendor/ext_config/moto-holi-fogos.config
+        -m \
+        -O out \
+        out/.config \
+        arch/arm64/configs/vendor/ext_config/moto-holi-fogos.config
 
         make O=out olddefconfig
 
-    - name: Enable KernelSU
-      working-directory: kernel
-      run: |
-        set -Eeuo pipefail
-        echo "CONFIG_KSU=y" >> out/.config
-        make O=out olddefconfig
 
-    - name: Build
+    - name: Build kernel
       working-directory: kernel
+      shell: bash
       run: |
         set -Eeuo pipefail
-        make O=out LLVM=1 LLVM_IAS=1 -j$(nproc)
 
-    - name: Create ZIP
+        export ARCH=arm64
+
+        make O=out \
+        LLVM=1 \
+        LLVM_IAS=1 \
+        -j$(nproc)
+
+
+    - name: Create AnyKernel ZIP
+      shell: bash
       run: |
         set -Eeuo pipefail
+
         git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
+
         cp kernel/out/arch/arm64/boot/Image AnyKernel3/
+
         cd AnyKernel3
         zip -r9 ../MotoG34_Kernel_Debug.zip .
+
 
     - uses: actions/upload-artifact@v4
       with:
